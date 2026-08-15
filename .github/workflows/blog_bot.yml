@@ -2,9 +2,11 @@ name: Blog Auto Bot Daily Run
 
 on:
   schedule:
-    # 매일 3회 실행 (한국시간 오전 8시, 오후 2시, 오후 8시)
-    - cron: '0 23,5,11 * * *'
-  workflow_dispatch:
+    # 깃허브 서버 대기 지연(약 20~30분)을 감안하여 실제 피크타임 30분 전으로 스케줄링
+    - cron: '30 22 * * *' # 아침 출근 피크 (KST 07:30 스케줄 -> 실제 발행 08:00 경)
+    - cron: '30 2 * * *'  # 점심 시간 피크 (KST 11:30 스케줄 -> 실제 발행 12:00 경)
+    - cron: '30 11 * * *' # 저녁 휴식 피크 (KST 20:30 스케줄 -> 실제 발행 21:00 경)
+  workflow_dispatch: # 수동 실행 버튼 활성화
 
 jobs:
   run-bot:
@@ -24,9 +26,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-      - name: Prepare Secrets
+      - name: Prepare Secrets and Credentials
         run: |
           echo "${{ secrets.ENV_FILE }}" > .env
+          echo '${{ secrets.GCP_CLIENT_SECRET_JSON }}' > client_secret.json
+          echo '${{ secrets.GCP_TOKEN_JSON }}' > token.json
           
       - name: Run Blog Auto Bot
         env:
