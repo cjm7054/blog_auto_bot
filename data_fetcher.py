@@ -14,62 +14,38 @@ class DataFetcher:
 
     def _call_mcporter(self, tool_name: str, query: str) -> list:
         """
-        Runs the mcporter command and attempts to parse the JSON array from the output.
-        Command format: mcporter call mcp-gateway.ToolName query="value"
+        [수정됨] GitHub Actions(클라우드) 환경에서는 로컬 PC에만 깔려있는 mcporter를 실행할 수 없으므로,
+        어디서든 100% 작동하는 구글 뉴스 RSS(Google News RSS)를 직접 크롤링하여 데이터를 수집하도록 로직을 변경합니다.
         """
-        # Note: Depending on OS, 'mcporter' or 'mcporter.cmd' might be needed.
-        cmd = ["mcporter", "call", f"{self.gateway_name}.{tool_name}", "query", query, "--timeout", "120000"]
-        logger.info(f"Running command: {' '.join(cmd)}")
+        import urllib.request
+        import urllib.parse
+        import xml.etree.ElementTree as ET
+
+        logger.info(f"Fetching Google News RSS for query: {query}")
+        # 구글 뉴스 한국어 검색 RSS URL
+        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
         
         try:
-            # shell=True might be required on Windows to find global npm packages
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, shell=True, encoding='utf-8')
-            output = result.stdout
+            # 크롤링 차단 방지를 위한 User-Agent 추가
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            response = urllib.request.urlopen(req)
+            xml_data = response.read()
+            root = ET.fromstring(xml_data)
             
-            # Find JSON object or array in the output string
-            start_idx_obj = output.find('{')
-            end_idx_obj = output.rfind('}')
+            formatted_items = []
+            # 상위 10개 뉴스만 추출
+            for item in root.findall('.//item')[:10]:
+                formatted_items.append({
+                    "title": item.find('title').text,
+                    "url": item.find('link').text,
+                    "date": item.find('pubDate').text
+                })
             
-            start_idx_arr = output.find('[')
-            end_idx_arr = output.rfind(']')
+            logger.info(f"Successfully fetched {len(formatted_items)} items from Google News RSS")
+            return formatted_items
             
-            if start_idx_obj != -1 and end_idx_obj != -1 and (start_idx_arr == -1 or start_idx_obj < start_idx_arr):
-                json_str = output[start_idx_obj:end_idx_obj+1]
-                data = json.loads(json_str)
-                # If it's a Naver Search response, extract items
-                if isinstance(data, dict) and "items" in data:
-                    items = data["items"]
-                    # Format Naver items to match our expected format
-                    formatted_items = []
-                    for item in items:
-                        formatted_items.append({
-                            "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
-                            "url": item.get("link", ""),
-                            "date": item.get("pubDate", "")
-                        })
-                    logger.info(f"Successfully fetched {len(formatted_items)} items from {tool_name}")
-                    return formatted_items
-                logger.info(f"Successfully fetched object from {tool_name}")
-                return [data]
-            elif start_idx_arr != -1 and end_idx_arr != -1:
-                json_str = output[start_idx_arr:end_idx_arr+1]
-                data = json.loads(json_str)
-                logger.info(f"Successfully fetched {len(data)} items from {tool_name}")
-                return data
-            else:
-                # If output is not an array, maybe it's a single object or plain text
-                logger.warning(f"Failed to find JSON array in output: {output}")
-                return []
-                
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error calling mcporter. Exit code: {e.returncode}")
-            logger.error(f"Stderr: {e.stderr}")
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON: {e}")
-            return []
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.error(f"Failed to fetch data from RSS: {e}")
             return []
 
     def get_latest_news(self, query: str = "AI"):
